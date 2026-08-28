@@ -87,6 +87,17 @@
   }
 
   body {
-    @apply bg-background text-foreground font-body;
+    @apply text-foreground font-body;
+    background: #1C1E21;
+    margin: 0;
+    overflow: hidden;
   }
+
+  button { touch-action: none; }
 }
+
+@keyframes card-deal {
+  from { opacity: 0; transform: translateY(-12px) rotateY(90deg); }
+  to { opacity: 1; transform: translateY(0) rotateY(0); }
+}
+.card-deal { animation: card-deal 160ms ease-out both; }
