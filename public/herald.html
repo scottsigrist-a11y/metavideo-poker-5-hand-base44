@@ -8,7 +8,6 @@
     <title>Five Hand Jacks or Better</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       html, body { margin: 0; padding: 0; background: #1C1E21; overflow: hidden; }
@@ -22,285 +21,356 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="text/babel" data-presets="react">
-      const { useEffect, useRef, useState } = React;
+    <script>
+      (function () {
+        var h = React.createElement;
+        var useEffect = React.useEffect;
+        var useRef = React.useRef;
+        var useState = React.useState;
 
-      // ---- poker.js ----
-      const BETS = [1, 5, 10, 100, 500];
-      const PAYTABLE = [
-        ['Royal Flush', 800], ['Straight Flush', 50], ['Four of a Kind', 25],
-        ['Full House', 9], ['Flush', 6], ['Straight', 4],
-        ['Three of a Kind', 3], ['Two Pair', 2], ['Jacks or Better', 1],
-      ];
-      const SUITS = ['\u2660', '\u2665', '\u2666', '\u2663'];
-      const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-      const newDeck = () => SUITS.flatMap((suit) => RANKS.map((rank, value) => ({ suit, rank, value: value + 2, id: `${rank}${suit}` })));
-      const shuffle = (cards) => {
-        const deck = [...cards];
-        for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
-        return deck;
-      };
-      const scoreHand = (cards) => {
-        const values = cards.map(c => c.value).sort((a, b) => a - b);
-        const counts = Object.values(values.reduce((a, v) => ({ ...a, [v]: (a[v] || 0) + 1 }), {})).sort((a, b) => b - a);
-        const flush = cards.every(c => c.suit === cards[0].suit);
-        const unique = [...new Set(values)];
-        const straight = unique.length === 5 && (unique[4] - unique[0] === 4 || unique.join(',') === '2,3,4,5,14');
-        if (flush && straight && values.includes(10) && values.includes(14)) return PAYTABLE[0];
-        if (flush && straight) return PAYTABLE[1];
-        if (counts[0] === 4) return PAYTABLE[2];
-        if (counts[0] === 3 && counts[1] === 2) return PAYTABLE[3];
-        if (flush) return PAYTABLE[4];
-        if (straight) return PAYTABLE[5];
-        if (counts[0] === 3) return PAYTABLE[6];
-        if (counts[0] === 2 && counts[1] === 2) return PAYTABLE[7];
-        const pair = values.find(v => values.filter(x => x === v).length === 2);
-        return pair >= 11 ? PAYTABLE[8] : null;
-      };
-
-      // ---- gameAudio.js ----
-      let context;
-      const audio = () => context || (context = new (window.AudioContext || window.webkitAudioContext)());
-      const tone = (frequency, duration, type = 'sine', volume = .06, delay = 0) => {
-        try {
-          const ctx = audio(), oscillator = ctx.createOscillator(), gain = ctx.createGain();
-          oscillator.type = type; oscillator.frequency.value = frequency; gain.gain.value = volume;
-          oscillator.connect(gain); gain.connect(ctx.destination);
-          oscillator.start(ctx.currentTime + delay); gain.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + delay + duration);
-          oscillator.stop(ctx.currentTime + delay + duration);
-        } catch (e) {}
-      };
-      const flipSound = (delay = 0) => { tone(180, .045, 'triangle', .035, delay); tone(95, .055, 'square', .018, delay + .025); };
-      const winSound = () => { tone(740, .16, 'sine', .07); tone(990, .22, 'sine', .055, .1); };
-      const creditSound = () => tone(1180, .035, 'sine', .035);
-
-      // ---- usePokerGame ----
-      const emptyHands = () => Array.from({ length: 5 }, () => Array(5).fill(null));
-      function usePokerGame() {
-        const [phase, setPhase] = useState('ready');
-        const [hands, setHands] = useState(emptyHands);
-        const [held, setHeld] = useState(Array(5).fill(false));
-        const [betIndex, setBetIndex] = useState(1);
-        const [credits, setCredits] = useState(() => Number(localStorage.getItem('vp-credits')) || 10000);
-        const [focus, setFocus] = useState({ type: 'control', index: 2 });
-        const [winners, setWinners] = useState([]);
-        const [roundWin, setRoundWin] = useState(0);
-        const [displayWin, setDisplayWin] = useState(0);
-        const [payoutsOpen, setPayoutsOpen] = useState(false);
-        const timer = useRef();
-        const bet = BETS[betIndex];
-        useEffect(() => { try { localStorage.setItem('vp-credits', credits); } catch (e) {} }, [credits]);
-        useEffect(() => () => clearInterval(timer.current), []);
-        const deal = () => {
-          clearInterval(timer.current);
-          const base = shuffle(newDeck()).slice(0, 5);
-          setHands(Array.from({ length: 5 }, () => base.map(card => ({ ...card }))));
-          setHeld(Array(5).fill(false));
-          setCredits(c => Math.max(0, c - bet * 5));
-          setWinners([]); setRoundWin(0); setDisplayWin(0);
-          setPhase('holding'); setFocus({ type: 'card', index: 0 });
-          Array.from({ length: 25 }, (_, i) => flipSound(i * .022));
-        };
-        const draw = () => {
-          const initial = hands[0], blocked = new Set(initial.map(c => c.id));
-          const final = hands.map(() => {
-            const deck = shuffle(newDeck().filter(c => !blocked.has(c.id)));
-            let n = 0;
-            return initial.map((c, i) => held[i] ? c : deck[n++]);
-          });
-          setHands(final);
-          final.forEach((hand, row) => hand.forEach((_, col) => !held[col] && flipSound((row * 5 + col) * .022)));
-          const results = final.map(scoreHand).filter(Boolean);
-          const grouped = Object.values(results.reduce((a, [name, mult]) => ({ ...a, [name]: { name, count: (a[name]?.count || 0) + 1, credits: (a[name]?.credits || 0) + mult * bet } }), {}));
-          const total = grouped.reduce((sum, item) => sum + item.credits, 0);
-          setWinners(grouped); setRoundWin(total); setCredits(c => c + total);
-          setPhase('result'); setFocus({ type: 'control', index: 2 });
-          if (total) {
-            winSound();
-            let shown = 0, step = Math.max(1, Math.ceil(total / 80));
-            timer.current = setInterval(() => {
-              shown = Math.min(total, shown + step);
-              setDisplayWin(shown); creditSound();
-              if (shown === total) clearInterval(timer.current);
-            }, 35);
+        // ---- poker.js ----
+        var BETS = [1, 5, 10, 100, 500];
+        var PAYTABLE = [
+          ['Royal Flush', 800], ['Straight Flush', 50], ['Four of a Kind', 25],
+          ['Full House', 9], ['Flush', 6], ['Straight', 4],
+          ['Three of a Kind', 3], ['Two Pair', 2], ['Jacks or Better', 1]
+        ];
+        var SUITS = ['\u2660', '\u2665', '\u2666', '\u2663'];
+        var RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+        function newDeck() {
+          var deck = [];
+          for (var s = 0; s < SUITS.length; s++) {
+            for (var r = 0; r < RANKS.length; r++) {
+              deck.push({ suit: SUITS[s], rank: RANKS[r], value: r + 2, id: RANKS[r] + SUITS[s] });
+            }
           }
-        };
-        const activate = () => {
-          if (payoutsOpen) return setPayoutsOpen(false);
-          if (focus.type === 'card') return setHeld(h => h.map((v, i) => i === focus.index ? !v : v));
-          if (focus.index === 0) return setPayoutsOpen(true);
-          if (focus.index === 1 && phase !== 'holding') return setBetIndex(i => (i + 1) % BETS.length);
-          if (focus.index === 2) return phase === 'holding' ? draw() : deal();
-        };
-        const move = (direction) => {
-          if (payoutsOpen) return;
-          if (direction === 'down') return setFocus(f => f.type === 'card' ? { type: 'control', index: 2 } : phase === 'holding' && f.index === 2 ? { type: 'card', index: 0 } : f);
-          setFocus(f => ({ ...f, index: (f.index + (direction === 'right' ? 1 : -1) + (f.type === 'card' ? 5 : 3)) % (f.type === 'card' ? 5 : 3) }));
-        };
-        return { phase, hands, held, bet, credits, focus, winners, roundWin, displayWin, payoutsOpen, activate, move, setFocus };
-      }
+          return deck;
+        }
+        function shuffle(cards) {
+          var deck = cards.slice();
+          for (var i = deck.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var t = deck[i]; deck[i] = deck[j]; deck[j] = t;
+          }
+          return deck;
+        }
+        function scoreHand(cards) {
+          var values = cards.map(function (c) { return c.value; }).sort(function (a, b) { return a - b; });
+          var tally = {};
+          values.forEach(function (v) { tally[v] = (tally[v] || 0) + 1; });
+          var counts = Object.keys(tally).map(function (k) { return tally[k]; }).sort(function (a, b) { return b - a; });
+          var flush = cards.every(function (c) { return c.suit === cards[0].suit; });
+          var unique = [];
+          values.forEach(function (v) { if (unique.indexOf(v) === -1) unique.push(v); });
+          var straight = unique.length === 5 && (unique[4] - unique[0] === 4 || unique.join(',') === '2,3,4,5,14');
+          if (flush && straight && values.indexOf(10) !== -1 && values.indexOf(14) !== -1) return PAYTABLE[0];
+          if (flush && straight) return PAYTABLE[1];
+          if (counts[0] === 4) return PAYTABLE[2];
+          if (counts[0] === 3 && counts[1] === 2) return PAYTABLE[3];
+          if (flush) return PAYTABLE[4];
+          if (straight) return PAYTABLE[5];
+          if (counts[0] === 3) return PAYTABLE[6];
+          if (counts[0] === 2 && counts[1] === 2) return PAYTABLE[7];
+          var pair = values.find(function (v) { return values.filter(function (x) { return x === v; }).length === 2; });
+          return pair >= 11 ? PAYTABLE[8] : null;
+        }
 
-      // ---- useSwipeControls ----
-      function useSwipeControls(move, activate, back) {
-        const start = useRef(null);
-        useEffect(() => {
-          const key = (e) => {
-            const map = { ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'down' };
-            if (map[e.key]) { e.preventDefault(); move(map[e.key]); }
-            if (e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
-            if (e.key === 'Escape') { e.preventDefault(); back(); }
+        // ---- gameAudio.js ----
+        var context;
+        function audio() { return context || (context = new (window.AudioContext || window.webkitAudioContext)()); }
+        function tone(frequency, duration, type, volume, delay) {
+          try {
+            var ctx = audio();
+            var osc = ctx.createOscillator();
+            var gain = ctx.createGain();
+            osc.type = type || 'sine';
+            osc.frequency.value = frequency;
+            gain.gain.value = volume == null ? 0.06 : volume;
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + (delay || 0));
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (delay || 0) + duration);
+            osc.stop(ctx.currentTime + (delay || 0) + duration);
+          } catch (e) {}
+        }
+        function flipSound(delay) {
+          tone(180, 0.045, 'triangle', 0.035, delay || 0);
+          tone(95, 0.055, 'square', 0.018, (delay || 0) + 0.025);
+        }
+        function winSound() { tone(740, 0.16, 'sine', 0.07); tone(990, 0.22, 'sine', 0.055, 0.1); }
+        function creditSound() { tone(1180, 0.035, 'sine', 0.035); }
+
+        // ---- usePokerGame ----
+        function emptyHands() {
+          return Array.from({ length: 5 }, function () { return Array(5).fill(null); });
+        }
+        function usePokerGame() {
+          var phase = useState('ready');
+          var hands = useState(emptyHands());
+          var held = useState(Array(5).fill(false));
+          var betIndex = useState(1);
+          var stored = 10000;
+          try { stored = Number(localStorage.getItem('vp-credits')) || 10000; } catch (e) {}
+          var credits = useState(stored);
+          var focus = useState({ type: 'control', index: 2 });
+          var winners = useState([]);
+          var roundWin = useState(0);
+          var displayWin = useState(0);
+          var payoutsOpen = useState(false);
+          var timer = useRef();
+          var bet = BETS[betIndex[0]];
+
+          useEffect(function () { try { localStorage.setItem('vp-credits', credits[0]); } catch (e) {} }, [credits[0]]);
+          useEffect(function () { return function () { clearInterval(timer.current); }; }, []);
+
+          function deal() {
+            clearInterval(timer.current);
+            var base = shuffle(newDeck()).slice(0, 5);
+            hands[1](Array.from({ length: 5 }, function () { return base.map(function (card) { return Object.assign({}, card); }); }));
+            held[1](Array(5).fill(false));
+            credits[1](function (c) { return Math.max(0, c - bet * 5); });
+            winners[1]([]); roundWin[1](0); displayWin[1](0);
+            phase[1]('holding'); focus[1]({ type: 'card', index: 0 });
+            for (var i = 0; i < 25; i++) flipSound(i * 0.022);
+          }
+
+          function draw() {
+            var initial = hands[0][0];
+            var blocked = {};
+            initial.forEach(function (c) { blocked[c.id] = true; });
+            var final = hands[0].map(function () {
+              var deck = shuffle(newDeck().filter(function (c) { return !blocked[c.id]; }));
+              var n = 0;
+              return initial.map(function (c, i) { return held[0][i] ? c : deck[n++]; });
+            });
+            hands[1](final);
+            final.forEach(function (hand, row) {
+              hand.forEach(function (_, col) { if (!held[0][col]) flipSound((row * 5 + col) * 0.022); });
+            });
+            var results = final.map(scoreHand).filter(Boolean);
+            var groupedMap = {};
+            results.forEach(function (r) {
+              var name = r[0], mult = r[1];
+              if (!groupedMap[name]) groupedMap[name] = { name: name, count: 0, credits: 0 };
+              groupedMap[name].count += 1;
+              groupedMap[name].credits += mult * bet;
+            });
+            var grouped = Object.keys(groupedMap).map(function (k) { return groupedMap[k]; });
+            var total = grouped.reduce(function (sum, item) { return sum + item.credits; }, 0);
+            winners[1](grouped); roundWin[1](total);
+            credits[1](function (c) { return c + total; });
+            phase[1]('result'); focus[1]({ type: 'control', index: 2 });
+            if (total) {
+              winSound();
+              var shown = 0, step = Math.max(1, Math.ceil(total / 80));
+              timer.current = setInterval(function () {
+                shown = Math.min(total, shown + step);
+                displayWin[1](shown); creditSound();
+                if (shown === total) clearInterval(timer.current);
+              }, 35);
+            }
+          }
+
+          function activate() {
+            if (payoutsOpen[0]) return payoutsOpen[1](false);
+            if (focus[0].type === 'card') {
+              return held[1](held[0].map(function (v, i) { return i === focus[0].index ? !v : v; }));
+            }
+            if (focus[0].index === 0) return payoutsOpen[1](true);
+            if (focus[0].index === 1 && phase[0] !== 'holding') {
+              return betIndex[1](function (i) { return (i + 1) % BETS.length; });
+            }
+            if (focus[0].index === 2) return phase[0] === 'holding' ? draw() : deal();
+          }
+
+          function move(direction) {
+            if (payoutsOpen[0]) return;
+            if (direction === 'down') {
+              return focus[1](function (f) {
+                if (f.type === 'card') return { type: 'control', index: 2 };
+                if (phase[0] === 'holding' && f.index === 2) return { type: 'card', index: 0 };
+                return f;
+              });
+            }
+            focus[1](function (f) {
+              var max = f.type === 'card' ? 5 : 3;
+              var delta = direction === 'right' ? 1 : -1;
+              return Object.assign({}, f, { index: (f.index + delta + max) % max });
+            });
+          }
+
+          return {
+            phase: phase[0], hands: hands[0], held: held[0], bet: bet, credits: credits[0],
+            focus: focus[0], winners: winners[0], roundWin: roundWin[0], displayWin: displayWin[0],
+            payoutsOpen: payoutsOpen[0], activate: activate, move: move, setFocus: focus[1]
           };
-          window.addEventListener('keydown', key);
-          return () => window.removeEventListener('keydown', key);
-        }, [move, activate, back]);
-        return {
-          onPointerDown: e => { start.current = { x: e.clientX, y: e.clientY }; },
-          onPointerUp: e => {
-            if (!start.current) return;
-            const dx = e.clientX - start.current.x, dy = e.clientY - start.current.y;
-            start.current = null;
-            if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
-            if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 'right' : 'left');
-            else dy < 0 ? activate() : move('down');
-          },
-        };
-      }
+        }
 
-      // ---- Components ----
-      function GameHeader({ credits, bet, phase }) {
-        return (
-          <header className="mx-2 mt-6 flex h-16 items-center justify-between border-b-2 border-yellow-400/50 px-4">
-            <div>
-              <h1 className="text-xl font-black italic tracking-tight text-yellow-300">FIVE HAND</h1>
-              <p className="text-xs font-bold tracking-[.18em] text-white">JACKS OR BETTER</p>
-            </div>
-            <div className="text-right text-xs text-blue-200">
-              <p>CREDITS <b className="text-lg text-white">{credits}</b></p>
-              <p>BET {bet} × 5 · {phase === 'holding' ? 'CHOOSE HOLDS' : phase === 'result' ? 'ROUND COMPLETE' : 'READY'}</p>
-            </div>
-          </header>
-        );
-      }
+        // ---- useSwipeControls ----
+        function useSwipeControls(move, activate, back) {
+          var start = useRef(null);
+          useEffect(function () {
+            function key(e) {
+              var map = { ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'down' };
+              if (map[e.key]) { e.preventDefault(); move(map[e.key]); }
+              if (e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+              if (e.key === 'Escape') { e.preventDefault(); back(); }
+            }
+            window.addEventListener('keydown', key);
+            return function () { window.removeEventListener('keydown', key); };
+          }, [move, activate, back]);
+          return {
+            onPointerDown: function (e) { start.current = { x: e.clientX, y: e.clientY }; },
+            onPointerUp: function (e) {
+              if (!start.current) return;
+              var dx = e.clientX - start.current.x, dy = e.clientY - start.current.y;
+              start.current = null;
+              if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
+              if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 'right' : 'left');
+              else if (dy < 0) activate(); else move('down');
+            }
+          };
+        }
 
-      function PlayingCard({ card, held, active, onSelect, compact = false, delay = 0 }) {
-        const red = card && (card.suit === '\u2665' || card.suit === '\u2666');
-        return (
-          <button onClick={onSelect} tabIndex={compact ? -1 : 0} style={{ animationDelay: `${delay}ms` }}
-            className={`${card ? 'card-deal' : ''} ${compact ? 'h-[48px] w-[42px]' : 'h-[66px] w-[52px]'} relative rounded-md border-2 bg-white font-black shadow-md transition-all duration-150 ${active ? 'border-yellow-300 ring-4 ring-cyan-300/90 -translate-y-1' : 'border-slate-300 opacity-80'} ${red ? 'text-red-600' : 'text-slate-950'}`}
-            aria-label={card ? `${card.rank} of ${card.suit}${held ? ', held' : ''}` : 'Empty card'}>
-            {card ? (
-              <>
-                <span className={`${compact ? 'text-[12px]' : 'text-base'} absolute left-1 top-0.5 leading-none`}>{card.rank}</span>
-                <span className={`${compact ? 'text-xl' : 'text-2xl'} leading-none`}>{card.suit}</span>
-                {held && <span className="absolute inset-x-0 bottom-0 rounded-b bg-yellow-300 py-0.5 text-[8px] tracking-wider text-slate-950">HELD</span>}
-              </>
-            ) : <span className="text-blue-900">★</span>}
-          </button>
-        );
-      }
+        // ---- Components ----
+        function GameHeader(props) {
+          var credits = props.credits, bet = props.bet, phase = props.phase;
+          var status = phase === 'holding' ? 'CHOOSE HOLDS' : phase === 'result' ? 'ROUND COMPLETE' : 'READY';
+          return h('header', { className: 'mx-2 mt-6 flex h-16 items-center justify-between border-b-2 border-yellow-400/50 px-4' },
+            h('div', null,
+              h('h1', { className: 'text-xl font-black italic tracking-tight text-yellow-300' }, 'FIVE HAND'),
+              h('p', { className: 'text-xs font-bold tracking-[.18em] text-white' }, 'JACKS OR BETTER')
+            ),
+            h('div', { className: 'text-right text-xs text-blue-200' },
+              h('p', null, 'CREDITS ', h('b', { className: 'text-lg text-white' }, credits)),
+              h('p', null, 'BET ' + bet + ' \u00d7 5 \u00b7 ' + status)
+            )
+          );
+        }
 
-      function HandRow({ hand, held, main, focus, onCard, row = 0 }) {
-        return (
-          <div className={`flex items-center justify-center gap-2 ${main ? 'mt-1' : ''}`}>
-            {hand.map((card, i) => (
-              <PlayingCard key={card?.id || i} card={card} held={held[i]} compact={!main}
-                active={main && focus?.type === 'card' && focus.index === i}
-                onSelect={() => main && onCard(i)} delay={(row * 5 + i) * 22} />
-            ))}
-          </div>
-        );
-      }
+        function PlayingCard(props) {
+          var card = props.card, held = props.held, active = props.active, compact = props.compact, delay = props.delay || 0;
+          var red = card && (card.suit === '\u2665' || card.suit === '\u2666');
+          var sizeClass = compact ? 'h-[48px] w-[42px]' : 'h-[66px] w-[52px]';
+          var activeClass = active ? 'border-yellow-300 ring-4 ring-cyan-300/90 -translate-y-1' : 'border-slate-300 opacity-80';
+          var colorClass = red ? 'text-red-600' : 'text-slate-950';
+          var children;
+          if (card) {
+            var bits = [
+              h('span', { className: (compact ? 'text-[12px]' : 'text-base') + ' absolute left-1 top-0.5 leading-none' }, card.rank),
+              h('span', { className: (compact ? 'text-xl' : 'text-2xl') + ' leading-none' }, card.suit)
+            ];
+            if (held) bits.push(h('span', { className: 'absolute inset-x-0 bottom-0 rounded-b bg-yellow-300 py-0.5 text-[8px] tracking-wider text-slate-950' }, 'HELD'));
+            children = bits;
+          } else {
+            children = h('span', { className: 'text-blue-900' }, '\u2605');
+          }
+          return h('button', {
+            onClick: props.onSelect,
+            tabIndex: compact ? -1 : 0,
+            style: { animationDelay: delay + 'ms' },
+            className: (card ? 'card-deal ' : '') + sizeClass + ' relative rounded-md border-2 bg-white font-black shadow-md transition-all duration-150 ' + activeClass + ' ' + colorClass,
+            'aria-label': card ? card.rank + ' of ' + card.suit + (held ? ', held' : '') : 'Empty card'
+          }, children);
+        }
 
-      function GameControls({ focus, phase, bet, onAction }) {
-        const names = ['PAYOUTS', 'BET', 'DEAL'];
-        return (
-          <footer className="absolute inset-x-2 bottom-2 flex h-[88px] items-stretch justify-center gap-3">
-            {names.map((name, i) => {
-              const label = i === 1 ? `BET ${bet}` : i === 2 && phase === 'holding' ? 'DRAW' : name;
-              const active = focus.type === 'control' && focus.index === i;
-              return (
-                <button key={name} onClick={() => onAction(i)}
-                  className={`h-[88px] min-w-[116px] rounded-lg border-2 px-4 text-sm font-black tracking-wider shadow-lg transition-all ${active ? 'border-yellow-200 bg-yellow-300 text-blue-950 ring-4 ring-cyan-300/70 -translate-y-1' : 'border-blue-200 bg-gradient-to-b from-blue-500 to-blue-800 text-white opacity-80'}`}>
-                  {label}
-                </button>
-              );
-            })}
-          </footer>
-        );
-      }
+        function HandRow(props) {
+          var hand = props.hand, held = props.held, main = props.main, focus = props.focus, row = props.row || 0;
+          var cards = hand.map(function (card, i) {
+            return h(PlayingCard, {
+              key: (card && card.id) || i,
+              card: card,
+              held: held[i],
+              compact: !main,
+              active: main && focus && focus.type === 'card' && focus.index === i,
+              onSelect: function () { if (main && props.onCard) props.onCard(i); },
+              delay: (row * 5 + i) * 22
+            });
+          });
+          return h('div', { className: 'flex items-center justify-center gap-2' + (main ? ' mt-1' : '') }, cards);
+        }
 
-      function Payouts({ bet }) {
-        return (
-          <div className="absolute inset-0 z-30 flex flex-col bg-blue-950 p-8 text-white">
-            <h2 className="text-center text-3xl font-black text-yellow-300">JACKS OR BETTER</h2>
-            <p className="mb-5 text-center text-sm">9/6 Full Pay · Bet {bet}</p>
-            <div className="flex-1 space-y-1">
-              {PAYTABLE.map(([name, multiplier]) => (
-                <div key={name} className="flex justify-between border-b border-blue-700 px-4 py-2 text-lg">
-                  <b>{name}</b><span className="text-yellow-300">{multiplier * bet}</span>
-                </div>
-              ))}
-            </div>
-            <p className="text-center text-base font-bold text-yellow-200">Swipe up to return to game</p>
-          </div>
-        );
-      }
+        function GameControls(props) {
+          var focus = props.focus, phase = props.phase, bet = props.bet;
+          var names = ['PAYOUTS', 'BET', 'DEAL'];
+          var buttons = names.map(function (name, i) {
+            var label = i === 1 ? 'BET ' + bet : (i === 2 && phase === 'holding' ? 'DRAW' : name);
+            var active = focus.type === 'control' && focus.index === i;
+            var cls = 'h-[88px] min-w-[116px] rounded-lg border-2 px-4 text-sm font-black tracking-wider shadow-lg transition-all ' +
+              (active ? 'border-yellow-200 bg-yellow-300 text-blue-950 ring-4 ring-cyan-300/70 -translate-y-1'
+                      : 'border-blue-200 bg-gradient-to-b from-blue-500 to-blue-800 text-white opacity-80');
+            return h('button', { key: name, onClick: function () { props.onAction(i); }, className: cls }, label);
+          });
+          return h('footer', { className: 'absolute inset-x-2 bottom-2 flex h-[88px] items-stretch justify-center gap-3' }, buttons);
+        }
 
-      function WinList({ winners }) {
-        return (
-          <aside className="absolute left-3 top-[118px] w-[142px] space-y-1 text-left">
-            {winners.map(item => (
-              <div key={item.name} className="rounded border border-yellow-400 bg-black/70 px-2 py-1 text-[10px] leading-tight text-yellow-200">
-                <b>{item.name}</b><br />{item.count}× · {item.credits} credits
-              </div>
-            ))}
-          </aside>
-        );
-      }
+        function Payouts(props) {
+          var bet = props.bet;
+          var rows = PAYTABLE.map(function (entry) {
+            var name = entry[0], multiplier = entry[1];
+            return h('div', { key: name, className: 'flex justify-between border-b border-blue-700 px-4 py-2 text-lg' },
+              h('b', null, name),
+              h('span', { className: 'text-yellow-300' }, multiplier * bet)
+            );
+          });
+          return h('div', { className: 'absolute inset-0 z-30 flex flex-col bg-blue-950 p-8 text-white' },
+            h('h2', { className: 'text-center text-3xl font-black text-yellow-300' }, 'JACKS OR BETTER'),
+            h('p', { className: 'mb-5 text-center text-sm' }, '9/6 Full Pay \u00b7 Bet ' + bet),
+            h('div', { className: 'flex-1 space-y-1' }, rows),
+            h('p', { className: 'text-center text-base font-bold text-yellow-200' }, 'Swipe up to return to game')
+          );
+        }
 
-      function WinPopup({ total, shown, show }) {
-        if (!show) return null;
-        return (
-          <div className="absolute left-1/2 top-1/2 z-20 w-52 -translate-x-1/2 -translate-y-1/2 rounded-xl border-4 border-yellow-300 bg-blue-950/95 p-4 text-center shadow-2xl">
-            <p className="text-xs font-bold tracking-[.2em] text-blue-200">ROUND WIN</p>
-            <p className="mt-1 text-4xl font-black text-yellow-300">{shown}</p>
-            <p className="text-sm text-white">CREDITS</p>
-          </div>
-        );
-      }
+        function WinList(props) {
+          var items = props.winners.map(function (item) {
+            return h('div', { key: item.name, className: 'rounded border border-yellow-400 bg-black/70 px-2 py-1 text-[10px] leading-tight text-yellow-200' },
+              h('b', null, item.name),
+              h('br'),
+              item.count + '\u00d7 \u00b7 ' + item.credits + ' credits'
+            );
+          });
+          return h('aside', { className: 'absolute left-3 top-[118px] w-[142px] space-y-1 text-left' }, items);
+        }
 
-      // ---- Home ----
-      function Home() {
-        const game = usePokerGame();
-        const gestures = useSwipeControls(game.move, game.activate, () => game.payoutsOpen && game.activate());
-        const selectControl = i => {
-          game.setFocus({ type: 'control', index: i });
-          if (game.focus.type === 'control' && game.focus.index === i) game.activate();
-        };
-        const selectCard = i => {
-          game.setFocus({ type: 'card', index: i });
-          if (game.focus.type === 'card' && game.focus.index === i) game.activate();
-        };
-        return (
-          <main className="min-h-screen select-none bg-[#1C1E21] text-white touch-none" {...gestures}>
-            <section className="relative mx-auto h-[600px] w-[600px] max-w-full overflow-hidden bg-[radial-gradient(circle_at_center,#1457a0_0%,#06265b_68%,#1C1E21_100%)] shadow-2xl">
-              <GameHeader credits={game.credits} bet={game.bet} phase={game.phase} />
-              {game.winners.length > 0 && <WinList winners={game.winners} />}
-              <div className={`mt-3 space-y-1 ${game.winners.length ? 'ml-[145px]' : ''}`}>
-                {game.hands.slice(1).map((hand, i) => (
-                  <HandRow key={i} row={i} hand={hand} held={game.held} />
-                ))}
-                <HandRow row={4} hand={game.hands[0]} held={game.held} main focus={game.focus} onCard={selectCard} />
-              </div>
-              <WinPopup total={game.roundWin} shown={game.displayWin} show={game.phase === 'result'} />
-              <GameControls focus={game.focus} phase={game.phase} bet={game.bet} onAction={selectControl} />
-              {game.payoutsOpen && <Payouts bet={game.bet} />}
-            </section>
-          </main>
-        );
-      }
+        function WinPopup(props) {
+          if (!props.show) return null;
+          return h('div', { className: 'absolute left-1/2 top-1/2 z-20 w-52 -translate-x-1/2 -translate-y-1/2 rounded-xl border-4 border-yellow-300 bg-blue-950/95 p-4 text-center shadow-2xl' },
+            h('p', { className: 'text-xs font-bold tracking-[.2em] text-blue-200' }, 'ROUND WIN'),
+            h('p', { className: 'mt-1 text-4xl font-black text-yellow-300' }, props.shown),
+            h('p', { className: 'text-sm text-white' }, 'CREDITS')
+          );
+        }
 
-      ReactDOM.createRoot(document.getElementById('root')).render(<Home />);
+        // ---- Home ----
+        function Home() {
+          var game = usePokerGame();
+          var gestures = useSwipeControls(game.move, game.activate, function () { if (game.payoutsOpen) game.activate(); });
+          function selectControl(i) {
+            game.setFocus({ type: 'control', index: i });
+            if (game.focus.type === 'control' && game.focus.index === i) game.activate();
+          }
+          function selectCard(i) {
+            game.setFocus({ type: 'card', index: i });
+            if (game.focus.type === 'card' && game.focus.index === i) game.activate();
+          }
+          var upperRows = game.hands.slice(1).map(function (hand, i) {
+            return h(HandRow, { key: i, row: i, hand: hand, held: game.held });
+          });
+          upperRows.push(h(HandRow, { key: 'main', row: 4, hand: game.hands[0], held: game.held, main: true, focus: game.focus, onCard: selectCard }));
+
+          return h('main', Object.assign({ className: 'min-h-screen select-none bg-[#1C1E21] text-white touch-none' }, gestures),
+            h('section', { className: 'relative mx-auto h-[600px] w-[600px] max-w-full overflow-hidden bg-[radial-gradient(circle_at_center,#1457a0_0%,#06265b_68%,#1C1E21_100%)] shadow-2xl' },
+              h(GameHeader, { credits: game.credits, bet: game.bet, phase: game.phase }),
+              game.winners.length > 0 ? h(WinList, { winners: game.winners }) : null,
+              h('div', { className: 'mt-3 space-y-1' + (game.winners.length ? ' ml-[145px]' : '') }, upperRows),
+              h(WinPopup, { total: game.roundWin, shown: game.displayWin, show: game.phase === 'result' }),
+              h(GameControls, { focus: game.focus, phase: game.phase, bet: game.bet, onAction: selectControl }),
+              game.payoutsOpen ? h(Payouts, { bet: game.bet }) : null
+            )
+          );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(h(Home));
+      })();
     </script>
   </body>
 </html>
