@@ -6,37 +6,26 @@
     <meta name="description" content="Five-hand Jacks or Better video poker for Meta Ray-Ban Display glasses." />
     <meta name="mrbd-web-app-capable" content="yes" />
     <title>Five Hand Jacks or Better</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            keyframes: {
-              'card-deal': {
-                from: { opacity: '0', transform: 'translateY(-12px) rotateY(90deg)' },
-                to:   { opacity: '1', transform: 'translateY(0) rotateY(0)' }
-              }
-            },
-            animation: { 'card-deal': 'card-deal 160ms ease-out both' }
-          }
-        }
-      };
-    </script>
     <style>
-      html, body { margin: 0; background: #1C1E21; overflow: hidden; height: 100%; }
+      html, body { margin: 0; padding: 0; background: #1C1E21; overflow: hidden; }
       button { touch-action: none; }
+      @keyframes card-deal {
+        from { opacity: 0; transform: translateY(-12px) rotateY(90deg); }
+        to { opacity: 1; transform: translateY(0) rotateY(0); }
+      }
       .card-deal { animation: card-deal 160ms ease-out both; }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
   </head>
   <body>
     <div id="root"></div>
     <script type="text/babel" data-presets="react">
-      const { useState, useEffect, useRef } = React;
+      const { useEffect, useRef, useState } = React;
 
-      /* ---------------- poker logic ---------------- */
+      // ---- poker.js ----
       const BETS = [1, 5, 10, 100, 500];
       const PAYTABLE = [
         ['Royal Flush', 800], ['Straight Flush', 50], ['Four of a Kind', 25],
@@ -44,8 +33,8 @@
         ['Three of a Kind', 3], ['Two Pair', 2], ['Jacks or Better', 1],
       ];
       const SUITS = ['\u2660', '\u2665', '\u2666', '\u2663'];
-      const RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
-      const newDeck = () => SUITS.flatMap((suit) => RANKS.map((rank, value) => ({ suit, rank, value: value + 2, id: rank + suit })));
+      const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+      const newDeck = () => SUITS.flatMap((suit) => RANKS.map((rank, value) => ({ suit, rank, value: value + 2, id: `${rank}${suit}` })));
       const shuffle = (cards) => {
         const deck = [...cards];
         for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
@@ -69,21 +58,23 @@
         return pair >= 11 ? PAYTABLE[8] : null;
       };
 
-      /* ---------------- audio ---------------- */
-      let audioCtx;
-      const audio = () => audioCtx || (audioCtx = new (window.AudioContext || window.webkitAudioContext)());
+      // ---- gameAudio.js ----
+      let context;
+      const audio = () => context || (context = new (window.AudioContext || window.webkitAudioContext)());
       const tone = (frequency, duration, type = 'sine', volume = .06, delay = 0) => {
-        const ctx = audio(), oscillator = ctx.createOscillator(), gain = ctx.createGain();
-        oscillator.type = type; oscillator.frequency.value = frequency; gain.gain.value = volume;
-        oscillator.connect(gain); gain.connect(ctx.destination);
-        oscillator.start(ctx.currentTime + delay); gain.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + delay + duration);
-        oscillator.stop(ctx.currentTime + delay + duration);
+        try {
+          const ctx = audio(), oscillator = ctx.createOscillator(), gain = ctx.createGain();
+          oscillator.type = type; oscillator.frequency.value = frequency; gain.gain.value = volume;
+          oscillator.connect(gain); gain.connect(ctx.destination);
+          oscillator.start(ctx.currentTime + delay); gain.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + delay + duration);
+          oscillator.stop(ctx.currentTime + delay + duration);
+        } catch (e) {}
       };
       const flipSound = (delay = 0) => { tone(180, .045, 'triangle', .035, delay); tone(95, .055, 'square', .018, delay + .025); };
       const winSound = () => { tone(740, .16, 'sine', .07); tone(990, .22, 'sine', .055, .1); };
       const creditSound = () => tone(1180, .035, 'sine', .035);
 
-      /* ---------------- game hook ---------------- */
+      // ---- usePokerGame ----
       const emptyHands = () => Array.from({ length: 5 }, () => Array(5).fill(null));
       function usePokerGame() {
         const [phase, setPhase] = useState('ready');
@@ -98,7 +89,7 @@
         const [payoutsOpen, setPayoutsOpen] = useState(false);
         const timer = useRef();
         const bet = BETS[betIndex];
-        useEffect(() => { localStorage.setItem('vp-credits', credits); }, [credits]);
+        useEffect(() => { try { localStorage.setItem('vp-credits', credits); } catch (e) {} }, [credits]);
         useEffect(() => () => clearInterval(timer.current), []);
         const deal = () => {
           clearInterval(timer.current);
@@ -112,7 +103,11 @@
         };
         const draw = () => {
           const initial = hands[0], blocked = new Set(initial.map(c => c.id));
-          const final = hands.map(() => { const deck = shuffle(newDeck().filter(c => !blocked.has(c.id))); let n = 0; return initial.map((c, i) => held[i] ? c : deck[n++]); });
+          const final = hands.map(() => {
+            const deck = shuffle(newDeck().filter(c => !blocked.has(c.id)));
+            let n = 0;
+            return initial.map((c, i) => held[i] ? c : deck[n++]);
+          });
           setHands(final);
           final.forEach((hand, row) => hand.forEach((_, col) => !held[col] && flipSound((row * 5 + col) * .022)));
           const results = final.map(scoreHand).filter(Boolean);
@@ -123,7 +118,11 @@
           if (total) {
             winSound();
             let shown = 0, step = Math.max(1, Math.ceil(total / 80));
-            timer.current = setInterval(() => { shown = Math.min(total, shown + step); setDisplayWin(shown); creditSound(); if (shown === total) clearInterval(timer.current); }, 35);
+            timer.current = setInterval(() => {
+              shown = Math.min(total, shown + step);
+              setDisplayWin(shown); creditSound();
+              if (shown === total) clearInterval(timer.current);
+            }, 35);
           }
         };
         const activate = () => {
@@ -141,7 +140,7 @@
         return { phase, hands, held, bet, credits, focus, winners, roundWin, displayWin, payoutsOpen, activate, move, setFocus };
       }
 
-      /* ---------------- gesture hook ---------------- */
+      // ---- useSwipeControls ----
       function useSwipeControls(move, activate, back) {
         const start = useRef(null);
         useEffect(() => {
@@ -151,7 +150,8 @@
             if (e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
             if (e.key === 'Escape') { e.preventDefault(); back(); }
           };
-          window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
+          window.addEventListener('keydown', key);
+          return () => window.removeEventListener('keydown', key);
         }, [move, activate, back]);
         return {
           onPointerDown: e => { start.current = { x: e.clientX, y: e.clientY }; },
@@ -166,11 +166,26 @@
         };
       }
 
-      /* ---------------- components ---------------- */
+      // ---- Components ----
+      function GameHeader({ credits, bet, phase }) {
+        return (
+          <header className="mx-2 mt-6 flex h-16 items-center justify-between border-b-2 border-yellow-400/50 px-4">
+            <div>
+              <h1 className="text-xl font-black italic tracking-tight text-yellow-300">FIVE HAND</h1>
+              <p className="text-xs font-bold tracking-[.18em] text-white">JACKS OR BETTER</p>
+            </div>
+            <div className="text-right text-xs text-blue-200">
+              <p>CREDITS <b className="text-lg text-white">{credits}</b></p>
+              <p>BET {bet} × 5 · {phase === 'holding' ? 'CHOOSE HOLDS' : phase === 'result' ? 'ROUND COMPLETE' : 'READY'}</p>
+            </div>
+          </header>
+        );
+      }
+
       function PlayingCard({ card, held, active, onSelect, compact = false, delay = 0 }) {
         const red = card && (card.suit === '\u2665' || card.suit === '\u2666');
         return (
-          <button onClick={onSelect} tabIndex={compact ? -1 : 0} style={{ animationDelay: delay + 'ms' }}
+          <button onClick={onSelect} tabIndex={compact ? -1 : 0} style={{ animationDelay: `${delay}ms` }}
             className={`${card ? 'card-deal' : ''} ${compact ? 'h-[48px] w-[42px]' : 'h-[66px] w-[52px]'} relative rounded-md border-2 bg-white font-black shadow-md transition-all duration-150 ${active ? 'border-yellow-300 ring-4 ring-cyan-300/90 -translate-y-1' : 'border-slate-300 opacity-80'} ${red ? 'text-red-600' : 'text-slate-950'}`}
             aria-label={card ? `${card.rank} of ${card.suit}${held ? ', held' : ''}` : 'Empty card'}>
             {card ? (
@@ -179,7 +194,7 @@
                 <span className={`${compact ? 'text-xl' : 'text-2xl'} leading-none`}>{card.suit}</span>
                 {held && <span className="absolute inset-x-0 bottom-0 rounded-b bg-yellow-300 py-0.5 text-[8px] tracking-wider text-slate-950">HELD</span>}
               </>
-            ) : <span className="text-blue-900">{'\u2605'}</span>}
+            ) : <span className="text-blue-900">★</span>}
           </button>
         );
       }
@@ -214,26 +229,11 @@
         );
       }
 
-      function GameHeader({ credits, bet, phase }) {
-        return (
-          <header className="mx-2 mt-6 flex h-16 items-center justify-between border-b-2 border-yellow-400/50 px-4">
-            <div>
-              <h1 className="text-xl font-black italic tracking-tight text-yellow-300">FIVE HAND</h1>
-              <p className="text-xs font-bold tracking-[.18em] text-white">JACKS OR BETTER</p>
-            </div>
-            <div className="text-right text-xs text-blue-200">
-              <p>CREDITS <b className="text-lg text-white">{credits}</b></p>
-              <p>BET {bet} {'\u00d7'} 5 {'\u00b7'} {phase === 'holding' ? 'CHOOSE HOLDS' : phase === 'result' ? 'ROUND COMPLETE' : 'READY'}</p>
-            </div>
-          </header>
-        );
-      }
-
       function Payouts({ bet }) {
         return (
           <div className="absolute inset-0 z-30 flex flex-col bg-blue-950 p-8 text-white">
             <h2 className="text-center text-3xl font-black text-yellow-300">JACKS OR BETTER</h2>
-            <p className="mb-5 text-center text-sm">9/6 Full Pay {'\u00b7'} Bet {bet}</p>
+            <p className="mb-5 text-center text-sm">9/6 Full Pay · Bet {bet}</p>
             <div className="flex-1 space-y-1">
               {PAYTABLE.map(([name, multiplier]) => (
                 <div key={name} className="flex justify-between border-b border-blue-700 px-4 py-2 text-lg">
@@ -251,7 +251,7 @@
           <aside className="absolute left-3 top-[118px] w-[142px] space-y-1 text-left">
             {winners.map(item => (
               <div key={item.name} className="rounded border border-yellow-400 bg-black/70 px-2 py-1 text-[10px] leading-tight text-yellow-200">
-                <b>{item.name}</b><br />{item.count}{'\u00d7'} {'\u00b7'} {item.credits} credits
+                <b>{item.name}</b><br />{item.count}× · {item.credits} credits
               </div>
             ))}
           </aside>
@@ -269,18 +269,27 @@
         );
       }
 
+      // ---- Home ----
       function Home() {
         const game = usePokerGame();
         const gestures = useSwipeControls(game.move, game.activate, () => game.payoutsOpen && game.activate());
-        const selectControl = i => { game.setFocus({ type: 'control', index: i }); if (game.focus.type === 'control' && game.focus.index === i) game.activate(); };
-        const selectCard = i => { game.setFocus({ type: 'card', index: i }); if (game.focus.type === 'card' && game.focus.index === i) game.activate(); };
+        const selectControl = i => {
+          game.setFocus({ type: 'control', index: i });
+          if (game.focus.type === 'control' && game.focus.index === i) game.activate();
+        };
+        const selectCard = i => {
+          game.setFocus({ type: 'card', index: i });
+          if (game.focus.type === 'card' && game.focus.index === i) game.activate();
+        };
         return (
           <main className="min-h-screen select-none bg-[#1C1E21] text-white touch-none" {...gestures}>
             <section className="relative mx-auto h-[600px] w-[600px] max-w-full overflow-hidden bg-[radial-gradient(circle_at_center,#1457a0_0%,#06265b_68%,#1C1E21_100%)] shadow-2xl">
               <GameHeader credits={game.credits} bet={game.bet} phase={game.phase} />
               {game.winners.length > 0 && <WinList winners={game.winners} />}
               <div className={`mt-3 space-y-1 ${game.winners.length ? 'ml-[145px]' : ''}`}>
-                {game.hands.slice(1).map((hand, i) => <HandRow key={i} row={i} hand={hand} held={game.held} />)}
+                {game.hands.slice(1).map((hand, i) => (
+                  <HandRow key={i} row={i} hand={hand} held={game.held} />
+                ))}
                 <HandRow row={4} hand={game.hands[0]} held={game.held} main focus={game.focus} onCard={selectCard} />
               </div>
               <WinPopup total={game.roundWin} shown={game.displayWin} show={game.phase === 'result'} />
